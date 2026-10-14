@@ -8,7 +8,7 @@ from urllib.parse import urljoin
 import discord
 import requests
 from bs4 import BeautifulSoup
-from discord.ext import commands, tasks
+from discord.ext import commands
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,8 +19,6 @@ CHANNEL_NAME = "anime alerts"
 SEEN_FILE = Path(__file__).with_name("seen_episodes.json")
 
 intents = discord.Intents.default()
-intents.message_content = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
@@ -56,7 +54,9 @@ def fetch_episodes():
 def load_seen():
     if SEEN_FILE.exists():
         try:
-            return set(json.loads(SEEN_FILE.read_text(encoding="utf-8")))
+            return set(json.loads(
+                SEEN_FILE.read_text(encoding="utf-8")
+            ))
         except (ValueError, OSError):
             pass
     return None
@@ -71,32 +71,20 @@ def save_seen(seen):
 
 @bot.event
 async def on_ready():
-    print(f"Bot is online: {bot.user}")
+    print(f"Bot connected: {bot.user}")
 
-    if not monitor_episodes.is_running():
-        monitor_episodes.start()
-
-
-@bot.command()
-async def ping(ctx):
-    await ctx.send("Pong! Anime Alerts is working.")
-
-
-@tasks.loop(minutes=5)
-async def monitor_episodes():
     try:
         episodes = await asyncio.to_thread(fetch_episodes)
 
         if not episodes:
-            print("No episode links found. Will retry.")
+            print("No episode links found.")
             return
 
         seen = load_seen()
 
-        # First run: save existing episodes without sending old alerts.
         if seen is None:
             save_seen({ep["url"] for ep in episodes})
-            print(f"Initial scan complete: {len(episodes)} links saved.")
+            print("Initial scan saved; no old alerts sent.")
             return
 
         channel = next(
@@ -128,14 +116,12 @@ async def monitor_episodes():
     except Exception as e:
         print(f"Monitoring error: {e}")
 
-
-@monitor_episodes.before_loop
-async def before_monitor():
-    await bot.wait_until_ready()
+    finally:
+        await bot.close()
 
 
 if not TOKEN:
-    raise ValueError("DISCORD_TOKEN is missing from .env")
+    raise ValueError("DISCORD_TOKEN is missing")
 
 
 bot.run(TOKEN)
