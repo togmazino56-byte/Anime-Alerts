@@ -6,10 +6,10 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 import discord
-import cloudscraper
 from bs4 import BeautifulSoup
 from discord.ext import commands
 from dotenv import load_dotenv
+from playwright.async_api import async_playwright
 
 load_dotenv()
 
@@ -26,44 +26,71 @@ def normalize(name):
     return name.lower().replace("_", " ").replace("-", " ").strip()
 
 
-def fetch_episodes():
-    scraper = cloudscraper.create_scraper(
-        browser={
-            "browser": "chrome",
-            "platform": "windows",
-            "desktop": True
-        }
-    )
+async def fetch_episodes():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
 
-    response = scraper.get(
-        SITE_URL,
-        timeout=25,
-        headers={
-            "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-            "Referer": SITE_URL
-        }
-    )
+        try:
+            context = await browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/131.0.0.0 Safari/537.36"
+                ),
+                locale="ar",
+            )
 
-    response.raise_for_status()
+            page = await context.new_page()
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    episodes = []
-    found = set()
+            response = await page.goto(
+                SITE_URL,
+                wait_until="domcontentloaded",
+                timeout=60000,
+            )
 
-    for a in soup.select('a[href*="/watch/"]'):
-        url = urljoin(SITE_URL, a.get("href", ""))
-        title = a.get_text(" ", strip=True)
+            if response is None:
+                raise RuntimeError(
+                    "WitAnime returned no main document response."
+                )
 
-        if "/watch/" not in url or not title or url in found:
-            continue
+            print(f"WitAnime HTTP status: {response.status}")
+            print(f"Final page URL: {page.url}")
+            print(f"Page title: {await page.title()}")
 
-        found.add(url)
-        episodes.append({
-            "title": title,
-            "url": url
-        })
+            if response.status >= 400:
+                raise RuntimeError(
+                    f"WitAnime returned HTTP {response.status}"
+                )
 
-    return episodes
+            await page.wait_for_timeout(3000)
+            html = await page.content()
+
+            soup = BeautifulSoup(html, "html.parser")
+            episodes = []
+            found = set()
+
+            for a in soup.select('a[href*="/watch/"]'):
+                url = urljoin(SITE_URL, a.get("href", ""))
+                title = a.get_text(" ", strip=True)
+
+                if (
+                    "/watch/" not in url
+                    or not title
+                    or url in found
+                ):
+                    continue
+
+                found.add(url)
+                episodes.append({
+                    "title": title,
+                    "url": url,
+                })
+
+            print(f"Episode links found: {len(episodes)}")
+            return episodes
+
+        finally:
+            await browser.close()
 
 
 def load_seen():
@@ -83,9 +110,9 @@ def save_seen(seen):
         json.dumps(
             sorted(seen),
             ensure_ascii=False,
-            indent=2
+            indent=2,
         ),
-        encoding="utf-8"
+        encoding="utf-8",
     )
 
 
@@ -94,7 +121,7 @@ async def on_ready():
     print(f"Bot connected: {bot.user}")
 
     try:
-        episodes = await asyncio.to_thread(fetch_episodes)
+        episodes = await fetch_episodes()
 
         if not episodes:
             print("No episode links found.")
@@ -113,7 +140,7 @@ async def on_ready():
                 if isinstance(c, discord.TextChannel)
                 and normalize(c.name) == normalize(CHANNEL_NAME)
             ),
-            None
+            None,
         )
 
         if channel is None:
