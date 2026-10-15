@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 import discord
-import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -27,17 +27,23 @@ def normalize(name):
 
 
 def fetch_episodes():
-    response = requests.get(
+    scraper = cloudscraper.create_scraper(
+        browser={
+            "browser": "chrome",
+            "platform": "windows",
+            "desktop": True
+        }
+    )
+
+    response = scraper.get(
         SITE_URL,
         timeout=25,
-       
-headers={        
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-    "Referer": "https://witanime.site/"
-}
+        headers={
+            "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+            "Referer": SITE_URL
+        }
     )
+
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
@@ -52,7 +58,10 @@ headers={
             continue
 
         found.add(url)
-        episodes.append({"title": title, "url": url})
+        episodes.append({
+            "title": title,
+            "url": url
+        })
 
     return episodes
 
@@ -65,12 +74,17 @@ def load_seen():
             ))
         except (ValueError, OSError):
             pass
+
     return None
 
 
 def save_seen(seen):
     SEEN_FILE.write_text(
-        json.dumps(sorted(seen), ensure_ascii=False, indent=2),
+        json.dumps(
+            sorted(seen),
+            ensure_ascii=False,
+            indent=2
+        ),
         encoding="utf-8"
     )
 
